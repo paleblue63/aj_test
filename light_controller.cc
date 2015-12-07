@@ -65,31 +65,34 @@ class TGAboutListener : public AboutListener {
 			//robj.AddInterface(org::freedesktop::DBus::InterfaceName);
 			//robj.AddInterface(org::freedesktop::DBus::Introspectable::InterfaceName);
 			status = robj.IntrospectRemoteObject();
-			if (status == ER_OK) {
-				size_t numIfaces = robj.GetInterfaces();
-				const InterfaceDescription** ifaces = new const InterfaceDescription*[numIfaces];
-				robj.GetInterfaces(ifaces, numIfaces);
+			if (status != ER_OK) {
+				printf("IntrospectRemoteObject fail\n");
+				return;
+			}
 
-				for (size_t j = 0; j < numIfaces; j++) {
-					const InterfaceDescription* ifc = ifaces[j];
-					size_t numMembers = ifc->GetMembers();
-					const InterfaceDescription::Member** members = new const InterfaceDescription::Member*[numMembers];
-					ifc->GetMembers(members, numMembers);
+			size_t numIfaces = robj.GetInterfaces();
+			const InterfaceDescription** ifaces = new const InterfaceDescription*[numIfaces];
+			robj.GetInterfaces(ifaces, numIfaces);
 
-					for (size_t m = 0; m < numMembers; m++) {
-						if (members[m]->memberType == MESSAGE_METHOD_CALL) {
-							const qcc::String inSig(members[m]->signature);
-							const qcc::String outSig(members[m]->returnSignature);
-							if (outSig.empty())
-								printf("METHOD: ifc = %s, mName = %s(%s)\n", ifc->GetName(), members[m]->name.c_str(), inSig.c_str());
-							else
-								printf("METHOD: ifc = %s, mName = %s(%s) -> %s\n", ifc->GetName(), members[m]->name.c_str(), inSig.c_str(), outSig.c_str());
-						} else if (members[m]->memberType == MESSAGE_SIGNAL) {
-							const qcc::String inSig(members[m]->signature);
-							printf("SIGNAL: ifc = %s, mName = %s\n", ifc->GetName(), members[m]->name.c_str());
-						} else {
-							printf("[MMM] others = %d, mName = %s\n", members[m]->memberType, members[m]->name.c_str());
-						}
+			for (size_t j = 0; j < numIfaces; j++) {
+				const InterfaceDescription* ifc = ifaces[j];
+				size_t numMembers = ifc->GetMembers();
+				const InterfaceDescription::Member** members = new const InterfaceDescription::Member*[numMembers];
+				ifc->GetMembers(members, numMembers);
+
+				for (size_t m = 0; m < numMembers; m++) {
+					if (members[m]->memberType == MESSAGE_METHOD_CALL) {
+						const qcc::String inSig(members[m]->signature);
+						const qcc::String outSig(members[m]->returnSignature);
+						if (outSig.empty())
+							printf("METHOD: ifc = %s, mName = %s(%s)\n", ifc->GetName(), members[m]->name.c_str(), inSig.c_str());
+						else
+							printf("METHOD: ifc = %s, mName = %s(%s) -> %s\n", ifc->GetName(), members[m]->name.c_str(), inSig.c_str(), outSig.c_str());
+					} else if (members[m]->memberType == MESSAGE_SIGNAL) {
+						const qcc::String inSig(members[m]->signature);
+						printf("SIGNAL: ifc = %s, mName = %s\n", ifc->GetName(), members[m]->name.c_str());
+					} else {
+						printf("[MMM] others = %d, mName = %s\n", members[m]->memberType, members[m]->name.c_str());
 					}
 				}
 			}
