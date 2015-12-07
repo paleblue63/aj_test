@@ -16,7 +16,7 @@
 
 #include <signal.h>
 
-//#define INTF_NAME "com.tgnine.Light"
+//#define TG_FULL_INTF
 
 using namespace std;
 using namespace ajn;
@@ -70,12 +70,22 @@ class TGAboutListener : public AboutListener {
 				return;
 			}
 
+			#if TG_FULL_INTF	// this make get all interfaces (introspectable...)
 			size_t numIfaces = robj.GetInterfaces();
 			const InterfaceDescription** ifaces = new const InterfaceDescription*[numIfaces];
 			robj.GetInterfaces(ifaces, numIfaces);
+			#else
+			size_t numIfaces = aod.GetInterfaces(paths[i], NULL, 0);
+			const char **intfs = new const char*[numIfaces];
+			aod.GetInterfaces(paths[i], intfs, numIfaces);
+			#endif
 
 			for (size_t j = 0; j < numIfaces; j++) {
+				#if TG_FULL_INTF
 				const InterfaceDescription* ifc = ifaces[j];
+				#else
+				const InterfaceDescription* ifc = g_bus->GetInterface(intfs[j]);
+				#endif
 				size_t numMembers = ifc->GetMembers();
 				const InterfaceDescription::Member** members = new const InterfaceDescription::Member*[numMembers];
 				ifc->GetMembers(members, numMembers);
