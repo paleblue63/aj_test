@@ -1,7 +1,6 @@
 
 #include <alljoyn/Status.h>
 #include <alljoyn/BusAttachment.h>
-//#include <alljoyn/Observer.h>
 #include <alljoyn/Init.h>
 
 // added for About
@@ -41,8 +40,6 @@ class TG_LightProxy{
 	char* intf_name = NULL;
 	SessionId sessionId;
 
-	//size_t numMembers;
-	//const InterfaceDescription::Member** members;
 	size_t numMethods;
 	const InterfaceDescription::Member** method_members;
 
@@ -92,7 +89,6 @@ class TG_LightProxy{
 		strcpy(this->obj_path, obj_path);
 		this->proxy = proxy;
 		this->ifc = ifc;
-		//size_t intf_len = strlen(if_name);
 		this->intf_name = new char[strlen(if_name)];
 		strcpy(this->intf_name, if_name);
 		this->sessionId = sId;
@@ -206,48 +202,42 @@ class TG_LightProxy{
 		for (; m < numMethods; m++) {
 			if((strncmp(method_members[m]->name.c_str(), methodName, strlen(methodName)) == 0)) {
 
-				if (!method_members[m]->signature.empty()) {
-					char* strSig = new char[method_members[m]->signature.length() + 1];
-					strcpy(strSig, method_members[m]->signature.c_str());
-					printf("[MMM] methods in signature = %s\n", strSig);
-					char sig = strSig[0];
-
+				size_t argNum = method_members[m]->signature.length();
+				MsgArg* args = new MsgArg[argNum];
+				string strIn;
+				for (size_t i = 0; i < argNum; i++) {
+					char sig = method_members[m]->signature.c_str()[i];
+					//printf("[MMM] sig = %c\n", sig);
 					switch(sig) {
 					case 'b':
 					{
-						MsgArg arg;
-						string strIn;
-						printf("\tenter t(ture) or f(false) > ");
-    					getline(cin, strIn);
-						char* input = new char[strIn.length() + 1];
-						strcpy(input, strIn.c_str());
+						printf("\tenter t(true) or f(false) > ");
+						getline(cin, strIn);
+						char input = strIn.c_str()[0];
 
-						arg.Set("b", input[0] == 't' ? true : false);
-						proxy.MethodCall(intf_name, method_members[m]->name.c_str(), &arg, 1, 0);
+						args[i].Set("b", input == 't' ? true : false);
 						break;
 					}
 					case 'u':
 					{
-						MsgArg arg;
-						string strIn;
-						printf("\tenter num [0-100] > ");
+						printf("\tenter num [0-255] > ");
 						getline(cin, strIn);
 						uint32_t input = atof(strIn.c_str());
 
-						if (input >=0 && input <=100) {
-							arg.Set("u", input);
-							proxy.MethodCall(intf_name, method_members[m]->name.c_str(), &arg, 1, 0);
-						} else {
+						printf("[MMM] in Num = %u\n", input);
+						if (input < 0 || input > 255) {
 							printf("[err] out of range\n");
 							return ER_OK;
 						}
+						args[i].Set("u", input);
 						break;
 					}
 					default:
-						printf("[err] not supported args\n");
+						printf("[err] not supported args signature type = %c\n", sig);
 						return ER_OK;
 					}
 				}
+				proxy.MethodCall(intf_name, method_members[m]->name.c_str(), args, argNum, 0);
 			}
 		}
 		if (m > numMethods) {
@@ -259,7 +249,6 @@ class TG_LightProxy{
 	}
 };
 
-//static TG_LightProxy* g_lightProxy = NULL;
 vector<TG_LightProxy*> g_lights;
 
 class TG_LightListener : 
@@ -344,7 +333,7 @@ class TG_LightListener :
 		QCC_UNUSED(member);
 		//QCC_UNUSED(path);
 		QCC_UNUSED(message);
-		printf("MMM] LightSignalHandler Call, path = %s\n", path);
+		printf("[MMM] LightSignalHandler Call, path = %s\n", path);
 	}
 
 	virtual void PropertiesChanged(ProxyBusObject& obj,
