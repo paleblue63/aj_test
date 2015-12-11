@@ -16,20 +16,20 @@
 #include <signal.h>
 #include <vector>
 
+//#define TG_FULL_INTF
+
 using namespace std;
 using namespace ajn;
 using namespace qcc;
 
-#if 1
-static volatile sig_atomic_t s_interrupt = false;
-
-static void CDECL_CALL SigIntHandler(int sig) {
-	QCC_UNUSED(sig);
-	s_interrupt = true;
-}
-#endif
+class TG_LightProxy;
+vector<TG_LightProxy*> g_lights;
 
 BusAttachment* g_bus = NULL;
+
+#define GET_LINE(str) { \
+		getline(cin, str); \
+		if (str.c_str()[0] == 'q') return ER_FAIL; }
 
 class TG_LightProxy{
 
@@ -37,7 +37,6 @@ class TG_LightProxy{
 	char* obj_path = NULL;
 	ProxyBusObject proxy;
 	const InterfaceDescription* ifc;
-	char* intf_name = NULL;
 	SessionId sessionId;
 
 	size_t numMethods;
@@ -77,20 +76,17 @@ class TG_LightProxy{
 		printf("[MMM] destroy\n");
 		delete obj_path;
 		delete ifc;
-		delete intf_name;
 		delete [] method_members;
 		delete [] signal_members;
 		delete [] props;
 	}
 
-	void Initialize(const char* obj_path, ProxyBusObject proxy, const InterfaceDescription* ifc, const char* if_name, SessionId sId)
+	void Initialize(const char* obj_path, ProxyBusObject proxy, const InterfaceDescription* ifc, SessionId sId)
 	{
 		this->obj_path = new char[strlen(obj_path)];
 		strcpy(this->obj_path, obj_path);
 		this->proxy = proxy;
 		this->ifc = ifc;
-		this->intf_name = new char[strlen(if_name)];
-		strcpy(this->intf_name, if_name);
 		this->sessionId = sId;
 
 		// temporary get all members
@@ -153,9 +149,10 @@ class TG_LightProxy{
 			const qcc::String outSig(method_members[i]->returnSignature);
 
 			if (outSig.empty())
-				printf("\tMETHOD: mName = %s(%s)\n", method_members[i]->name.c_str(), inSig.c_str());
+				printf("\tMETHOD: %s(%s)\n", method_members[i]->name.c_str(), inSig.c_str());
 			else
-				printf("\tMETHOD: mName = %s(%s) -> %s\n", method_members[i]->name.c_str(), inSig.c_str(), outSig.c_str());
+				printf("\tMETHOD: %s(%s) -> %s\n", method_members[i]->name.c_str(), inSig.c_str(), outSig.c_str());
+
 		}
 	}
 
@@ -163,16 +160,17 @@ class TG_LightProxy{
 	{
 		for (size_t i = 0; i < numSignals; i++) {
 			const qcc::String inSig(signal_members[i]->signature);
-            printf("\tSIGNAL: mName = %s(%s)\n", signal_members[i]->name.c_str(), inSig.c_str());
+
+            printf("\tSIGNAL: %s(%s)\n", signal_members[i]->name.c_str(), inSig.c_str());
         }
 	}
 
 	void ShowProperties()
 	{
 		for (size_t p = 0; p < numProps; p++) {
-			printf("\tPROP  : mName = %s (type = %s)", props[p]->name.c_str(), props[p]->signature.c_str());
+			printf("\tPROP  : %s (type = %s)", props[p]->name.c_str(), props[p]->signature.c_str());
 			MsgArg arg;
-			proxy.GetProperty(intf_name, props[0]->name.c_str(), arg);
+			proxy.GetProperty(ifc->GetName(), props[0]->name.c_str(), arg);
 			if (strncmp(props[p]->signature.c_str(), "b", 1) == 0) {
 				bool val;
 				arg.Get("b", &val);
@@ -188,7 +186,7 @@ class TG_LightProxy{
 
 	void ShowThisObject()
 	{
-		printf("BusObj = %s, interface = %s\n", this->obj_path, this->intf_name);
+		printf("BusObj = %s, interface = %s\n", this->obj_path, this->ifc->GetName());
 		ShowMethods();
 		ShowSignals();
 		ShowProperties();
@@ -207,12 +205,11 @@ class TG_LightProxy{
 				string strIn;
 				for (size_t i = 0; i < argNum; i++) {
 					char sig = method_members[m]->signature.c_str()[i];
-					//printf("[MMM] sig = %c\n", sig);
 					switch(sig) {
 					case 'b':
 					{
 						printf("\tenter t(true) or f(false) > ");
-						getline(cin, strIn);
+						GET_LINE(strIn);
 						char input = strIn.c_str()[0];
 
 						args[i].Set("b", input == 't' ? true : false);
@@ -221,10 +218,9 @@ class TG_LightProxy{
 					case 'u':
 					{
 						printf("\tenter num [0-255] > ");
-						getline(cin, strIn);
+						GET_LINE(strIn);
 						uint32_t input = atof(strIn.c_str());
 
-						printf("[MMM] in Num = %u\n", input);
 						if (input < 0 || input > 255) {
 							printf("[err] out of range\n");
 							return ER_OK;
@@ -237,7 +233,7 @@ class TG_LightProxy{
 						return ER_OK;
 					}
 				}
-				proxy.MethodCall(intf_name, method_members[m]->name.c_str(), args, argNum, 0);
+				proxy.MethodCall(this->ifc->GetName(), method_members[m]->name.c_str(), args, argNum, 0);
 			}
 		}
 		if (m > numMethods) {
@@ -248,8 +244,6 @@ class TG_LightProxy{
 		return ER_OK;
 	}
 };
-
-vector<TG_LightProxy*> g_lights;
 
 class TG_LightListener : 
 	public AboutListener,
@@ -285,27 +279,42 @@ class TG_LightListener :
 		for (size_t i = 0; i < path_num; ++i) {
 			printf("\n");
 			ProxyBusObject robj(*g_bus, busName, paths[i], sessionId);
+			#ifdef TG_FULL_INTF
+			robj.AddInterface(org::freedesktop::DBus::InterfaceName);
+			robj.AddInterface(org::freedesktop::DBus::Introspectable::InterfaceName);
+			#endif
 			status = robj.IntrospectRemoteObject();
 			if (status != ER_OK) {
 				printf("IntrospectRemoteObject fail\n");
 				return;
 			}
 
+			#ifdef TG_FULL_INTF
+			size_t numIfaces = robj.GetInterfaces();
+			const InterfaceDescription** ifaces = new const InterfaceDescription*[numIfaces];
+			robj.GetInterfaces(ifaces, numIfaces);
+			#else
 			size_t numIfaces = aod.GetInterfaces(paths[i], NULL, 0);
 			const char **intfs = new const char*[numIfaces];
 			aod.GetInterfaces(paths[i], intfs, numIfaces);
+			#endif
 
 			for (size_t j = 0; j < numIfaces; j++) {
-				const InterfaceDescription* ifc = g_bus->GetInterface(intfs[j]);
 				TG_LightProxy* light = new TG_LightProxy();
 				g_lights.push_back(light);
-				light->Initialize(paths[i], robj, ifc, intfs[j], sessionId);
+				#ifdef TG_FULL_INTF
+				const InterfaceDescription* ifc = ifaces[j];
+				light->Initialize(paths[i], robj, ifc, sessionId);
+				#else
+				const InterfaceDescription* ifc = g_bus->GetInterface(intfs[j]);
+				light->Initialize(paths[i], robj, ifc, sessionId);
+				#endif
 
 				// register listener for property change
 				size_t numProps = ifc->GetProperties();
 				const char** propName = new const char*[numProps];
 				light->GetPropsName(propName);
-				robj.RegisterPropertiesChangedListener(intfs[j], propName, numProps, *this, NULL);
+				robj.RegisterPropertiesChangedListener(ifc->GetName(), propName, numProps, *this, NULL);
 
 				// register signal handler
 				size_t numSignals = light->GetSignalNum();
@@ -323,7 +332,11 @@ class TG_LightListener :
                 printf("==================================================\n");
 
 			}
+			#ifdef TG_FULL_INTF
+			delete [] ifaces;
+			#else
 			delete [] intfs;
+			#endif
 		}
 		delete [] paths;
 	}	// end of Annouced()
@@ -333,7 +346,7 @@ class TG_LightListener :
 		QCC_UNUSED(member);
 		//QCC_UNUSED(path);
 		QCC_UNUSED(message);
-		printf("[MMM] LightSignalHandler Call, path = %s\n", path);
+		printf("[N] Signal from path = %s, name= %s\n", path, member->name.c_str());
 	}
 
 	virtual void PropertiesChanged(ProxyBusObject& obj,
@@ -352,7 +365,7 @@ class TG_LightListener :
 		printf("\t[N] property changed of (%s)\n", obj.GetPath().c_str());
 		g_bus->EnableConcurrentCallbacks();
 
-		// [[ looking for light object
+		// find light object
 		TG_LightProxy *light;
 		for (i = 0; i < (g_lights.size() - 1); i++) {
 			light = g_lights[i];
@@ -363,7 +376,6 @@ class TG_LightListener :
 			printf("[err] can not find light object\n");
 			return;
 		}
-		// ]]
 
 		size_t nelem = 0;
 		MsgArg* elems = NULL;
@@ -407,32 +419,31 @@ class TG_LightListener :
 	{
 		printf("SessionLost sessionId = %u, Reason = %d\n", sessionId, reason);
 
-		// vector<TG_LightProxy*> g_lights;
-#if 0
+#if 1
+/*
+		vector<TG_LightProxy*>::iterator it = g_lights.begin();
+		for (size_t i = 0; i < g_lights.size(); i++, it++) {
+			TG_LightProxy *light = *it;
+			if (light->GetSessionId() == sessionId) {
+				printf("[MMM] delete obj [%zu]\n", i);
+				//int pos = distance(g_lights.begin(), it);
+				//printf("[MMM] distance = %d\n", pos);
+				//g_lights.erase(g_lights.at(i));
+				g_lights = g_lights.erase(it);
+			}
+		}
+*/
+#else
 		vector<TG_LightProxy*>::iterator it = g_lights.begin();
 		while (it != g_lights.end()) {
-			TG_LightProxy light = it;
+			TG_LightProxy *light = *it;
 			if (light->GetSessionId() == sessionId) {
 				printf("[MMM] delete obj\n");
-				g_lights.erase(it);
+				//g_lights.erase(*it);
 			}
 			it++;
 		}
 #endif	
-
-		#if 0
-		TG_LightProxy *light;
-        for (size_t i = 0; i < (g_lights.size() - 1); i++) {
-            light = g_lights[i];
-			if (light->GetSessionId() == sessionId) {
-				printf("[MMM] delete obj\n");
-				g_lights.erase(i);
-			}
-            //if (strcmp(light->GetObjPath(), obj.GetPath().c_str()) == 0)
-            //    break;
-        }
-		#endif
-
 	}
 };
 
@@ -446,9 +457,8 @@ static QStatus CallLightMethod()
 		usleep(100 * 1000);
 	}
 
-    //cout << "Select obj >";
 	printf("Select obj num [0 - %zu] > \n", g_lights.size() - 1);
-    getline(cin, input);
+	GET_LINE(input);
 
 	uint32_t i = atof(input.c_str());
 	if ( i < 0 || i >= g_lights.size())
@@ -458,7 +468,7 @@ static QStatus CallLightMethod()
 	light->ShowThisObject();
 
 	cout << "Enter Method > ";
-	getline(cin, input);
+	GET_LINE(input);
 	status = light->CallMethods(input);
 	return status;
 }
@@ -479,8 +489,6 @@ int CDECL_CALL main(int argc, char** argv)
 	}
 #endif
 
-	signal(SIGINT, SigIntHandler);
-
 	QStatus status;
 	g_bus = new BusAttachment("light_controller", true);
 	status = g_bus->Start();
@@ -498,22 +506,13 @@ int CDECL_CALL main(int argc, char** argv)
 		goto exit;
 	}
 
-#if 0
-	while(!done) {
-		string input;
-		cout << "> ";
-		getline(cin, input);
-		done = !Parse(input);
-	}
-#endif
-
-	while(!s_interrupt && ER_OK == status) {
+	while (ER_OK == status) {
 		status = CallLightMethod();
 	}
 
 exit:
 	g_bus->UnregisterAboutListener(*lightListener);
-	//delete g_lightProxy;
+	//delete g_lights;
 	delete lightListener;
 	delete g_bus;
 
